@@ -8,6 +8,7 @@ import java.util.*;
 
 public class UserDaoJDBCImpl implements UserDao {
     private final String tableName = "users";
+    private Savepoint savepoint;
     private Connection connection;
     private Statement statement;
 
@@ -15,6 +16,7 @@ public class UserDaoJDBCImpl implements UserDao {
         try {
             connection = Util.getConnection();
             statement = connection.createStatement();
+            savepoint = connection.setSavepoint();
         } catch (SQLException e) {
             e.printStackTrace();
         }
@@ -22,16 +24,25 @@ public class UserDaoJDBCImpl implements UserDao {
 
     private boolean tableExists(Connection connection) throws SQLException {
         ResultSet resultSet = connection.getMetaData().getTables(null, null, tableName, null);
-        return resultSet.next()
-                && resultSet.getString(3).equals(tableName);
+        return resultSet.next() && resultSet.getString(3).equals(tableName);
     }
 
-    private void executeAndClose(String sql, Statement statement, Connection connection) throws SQLException {
-        if (sql != null) {
-            statement.executeUpdate(sql);
+    private void closeStateAndConn(Statement statement, Connection connection) {
+        try {
+            statement.close();
+            connection.close();
+        } catch (SQLException sqlException) {
+            safeRollback(sqlException);
         }
-        statement.close();
-        connection.close();
+    }
+
+    private void safeRollback(SQLException sqlException) {
+        try {
+            connection.rollback(savepoint);
+        } catch (SQLException rollbackFail) {
+            sqlException.addSuppressed(rollbackFail);
+        }
+        sqlException.printStackTrace();
     }
 
     public void createUsersTable() {
@@ -43,42 +54,49 @@ public class UserDaoJDBCImpl implements UserDao {
                 "  PRIMARY KEY (`id`)\n" +
                 ") ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=utf8mb4;";
         try {
-            executeAndClose(sql, statement, connection);
+            statement.executeUpdate(sql);
         } catch (SQLException e) {
-            e.printStackTrace();
+            safeRollback(e);
+        } finally {
+            closeStateAndConn(statement, connection);
         }
     }
 
     public void dropUsersTable() {
         final String sql = "DROP TABLE IF EXISTS " + tableName;
         try {
-            executeAndClose(sql, statement, connection);
+            statement.executeUpdate(sql);
         } catch (SQLException e) {
-            e.printStackTrace();
+            safeRollback(e);
+        } finally {
+            closeStateAndConn(statement, connection);
         }
     }
 
     public void saveUser(String name, String lastName, byte age) {
 //        Почему нельзя вместо users использовать знак вопроса?
-        final String sql = "insert into users(name, lastName, age) values (?, ?, ?)";
+        final String sql = "insert into " + tableName + "(name, lastName, age) values (?, ?, ?)";
         try (PreparedStatement prepareStatement = connection.prepareStatement(sql)) {
 //            prepareStatement.setString(1, tableName);
             prepareStatement.setString(1, name);
             prepareStatement.setString(2, lastName);
             prepareStatement.setString(3, Byte.toString(age));
             prepareStatement.executeUpdate();
-            connection.close();
         } catch (SQLException e) {
-            e.printStackTrace();
+            safeRollback(e);
+        } finally {
+            closeStateAndConn(statement, connection);
         }
     }
 
     public void removeUserById(long id) {
         final String sql = "delete from " + tableName + " where id = " + id;
         try {
-            executeAndClose(sql, statement, connection);
+            statement.executeUpdate(sql);
         } catch (SQLException e) {
-            e.printStackTrace();
+            safeRollback(e);
+        } finally {
+            closeStateAndConn(statement, connection);
         }
     }
 
@@ -99,24 +117,21 @@ public class UserDaoJDBCImpl implements UserDao {
                 userList.add(user);
             }
         } catch (SQLException e) {
-            e.printStackTrace();
+            safeRollback(e);
+        } finally {
+            closeStateAndConn(statement, connection);
         }
         return userList;
     }
 
     public void cleanUsersTable() {
-//        Лучше удалить все элементы так?
-//        final String sql = "DELETE FROM users";
-//        Или лучше сначала удалить таблицу,
-//        final String sql = "DROP TABLE users";
         final String sql = "truncate table " + tableName;
         try {
-            executeAndClose(sql, statement, connection);
-//            statement.executeUpdate(sql);
+            statement.executeUpdate(sql);
         } catch (SQLException e) {
-            e.printStackTrace();
+            safeRollback(e);
+        } finally {
+            closeStateAndConn(statement, connection);
         }
-//        а потом заново создать её?
-//        createUsersTable();
     }
 }
