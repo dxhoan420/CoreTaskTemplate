@@ -19,11 +19,22 @@ public class UserDaoHibernateImpl implements UserDao {
         session = Util.getSessionFactory().openSession();//Почему здесь не работает getCurrentSession?
     }
 
+    private void safeRollback(Exception e) {
+        if (transaction != null && transaction.isActive()) {
+            transaction.rollback();
+        }
+        e.printStackTrace();
+    }
+
     private void createQueryAndExecute(String sql) {
-        transaction = session.beginTransaction();
-        Query query = session.createSQLQuery(sql).addEntity(User.class);
-        query.executeUpdate();
-        transaction.commit();
+        try {
+            transaction = session.beginTransaction();
+            Query query = session.createSQLQuery(sql).addEntity(User.class);
+            query.executeUpdate();
+            transaction.commit();
+        } catch (Exception e) {
+            safeRollback(e);
+        }
     }
 
     @Override
@@ -45,29 +56,39 @@ public class UserDaoHibernateImpl implements UserDao {
 
     @Override
     public void saveUser(String name, String lastName, byte age) {
-        transaction = session.beginTransaction();
-        session.save(new User(name, lastName, age));
-        transaction.commit();
+        try {
+            transaction = session.beginTransaction();
+            session.save(new User(name, lastName, age));
+            transaction.commit();
+        } catch (Exception e) {
+            safeRollback(e);
+        }
     }
 
     @Override
     public void removeUserById(long id) {
-        transaction = session.beginTransaction();
-        //Hibernate
-        User forRemoving = session.get(User.class, id);
-        //JPA
+        try {
+            transaction = session.beginTransaction();
+            //Hibernate
+            User forRemoving = session.get(User.class, id);
+            //JPA
 //        User forRemoving = session.find(User.class, id);
-        if (forRemoving != null)
-            session.remove(forRemoving);
-        transaction.commit();
+            if (forRemoving != null)
+                session.remove(forRemoving);
+            transaction.commit();
+        } catch (Exception e) {
+            safeRollback(e);
+        }
     }
 
     @Override
     public List<User> getAllUsers() {
+        //Criteria API
         builder = session.getCriteriaBuilder();
         CriteriaQuery<User> query = builder.createQuery(User.class);
-        Root<User> root = query.from(User.class);
+        query.from(User.class);
         return session.createQuery(query).list();
+        //HQL
 //        return session.createQuery("from User", User.class).list();
     }
 
